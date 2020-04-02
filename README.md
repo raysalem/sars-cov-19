@@ -1,3 +1,3 @@
 # sars-cov-19
 
-* basic tool show how to read data from john hopkins data base and store into a python pandas data frame, for easy modelling and visualiation 
+*leveraging variety of sar-covid-19 data sets to visualize the data to be better understand the state of affairs, and where things are going.
