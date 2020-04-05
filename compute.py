@@ -48,6 +48,22 @@ default_cycler = (cycler(marker=['.','*','+','x','s']) *
 
 plt.rc('axes', prop_cycle=default_cycler)
 
+def getList(level,parent=""):
+    if(level=="country"):
+        idx    = pd.IndexSlice[:,:,:,:,"cases",level]
+    elif(level=="state"):
+        #must have country with state
+        if(parent!=""):
+            idx    = pd.IndexSlice[:,:,:,parent,"cases",level]
+        else:
+            idx    = pd.IndexSlice[:,:,:,:,     "cases",level]
+
+    g = dataTCS.loc[idx,:][dataTCS.loc[idx,"date"] == datetime.date(2020,4,1) ]
+    if(level=="country"):
+        return np.sort([c[3] for c  in g.index.values])
+    else:
+        return np.sort([c[2] for c  in g.index.values])
+
 #** panda data frame styles
 from IPython.display import display_html
 def display_side_by_side(*args):
@@ -59,40 +75,48 @@ def display_side_by_side(*args):
     
     
 def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",equalizeCount=100, plotKpi="deaths",logyPlot=True,
-           countryStateSweep=-1, reference=False, xlim=-1, ylim=-1):
+           level="country", country="", reference=False, xlim=-1, ylim=-1):
     idx = pd.IndexSlice
         
     fig,ax = plt.subplots(1,1)
     if(equalize):
-        if(countryStateSweep==-1):
-            g = dataTCS.loc[idx["-1","-1","-1",equalizeTrg,minCountKpi]]
+        if(level=="country"):
+            g = dataTCS.loc[idx[:,:,:,equalizeTrg,minCountKpi,level],:]
         else:
-            g = dataTCS.loc[idx["-1","-1",equalizeTrg,countryStateSweep,minCountKpi]]
+            g = dataTCS.loc[idx[:,:,equalizeTrg,:,minCountKpi,level],:]
+        if(max(g["value"]) < equalizeCount):
+            print("reduce equalize count")
+            return
         gdts = g[g["value"]>equalizeCount]["date"].values[0]
         gdte = g["date"].values[-1]
         N = (gdte-gdts).days#sp.size(g[g["value"]>equalizeCount]["date"].values)
         print("Equalize to %s : date:%s to %s" % (equalizeTrg,gdts,gdte))
     if(reference):
-        for rate in np.array([8., 13., 21., 34.])/100.:            
+        ref =  [8., 13., 21., 34.]
+        for rate in np.array(ref)/100.:            
             d = g[g["date"]>=gdts]["date"]
             #y0= g[g["date"]>=gdts]["value"].values[0]
             y0=equalizeCount
             M= sp.size(d.values)
-            ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--',label="ref%.1f"%(rate*100))
-    if(countryStateSweep==-1):
-        idxScreen = lambda ctr :idx["-1","-1","-1",ctr,minCountKpi];
-        idxPlot   = lambda ctr :idx["-1","-1","-1",ctr,plotKpi];
+            ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--')#,label="ref%.1f"%(rate*100))
+        print(ref)
+    if(level=="country"):
+        idxScreen = lambda ctr :idx[:,:,:,ctr,minCountKpi,level];
+        idxPlot   = lambda ctr :idx[:,:,:,ctr,plotKpi    ,level];
         countries = dataTCS.index.levels[3]
     else:
         #ctr becomes a loop variable for state
-        idxScreen = lambda ctr :idx["-1","-1",ctr,countryStateSweep,minCountKpi];
-        idxPlot   = lambda ctr :idx["-1","-1",ctr,countryStateSweep,plotKpi];
+        idxScreen = lambda ctr :idx[:,:,ctr,:,minCountKpi,level];
+        idxPlot   = lambda ctr :idx[:,:,ctr,:,plotKpi    ,level];
         # using states here
-        countries = np.sort(np.unique(dataTCS.loc[idx["-1","-1",:,countryStateSweep,"cases"]].index.values))[1:]
+        countries = np.sort(np.unique(dataTCS.loc[idx[:,:,:,country,"cases",level],:].index.values))[1:]
     
     # temp commented out    
-    for ctr in countries:    
-        if dataTCS.loc[idxScreen(ctr)].value[-1]< minCount: continue     
+    for ctr in countries:  
+        try:
+            if dataTCS.loc[idxScreen(ctr),"value"].values[-1]< minCount: continue     
+        except:
+            continue
         try:
             g = dataTCS.loc[idxPlot(ctr),["date","value"]]        
         except:
@@ -109,7 +133,7 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
             ts=g.index
             data=g["value"]
             M=sp.size(g)
-        ax.plot(ts[0:M],data["value"][0:M].values,label=ctr)    
+        ax.plot(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])    
     
     ax.xaxis.set_major_locator(myLocator)
     ax.xaxis.set_major_formatter(myFmt)
@@ -144,52 +168,54 @@ logyPlot     = True
 
 
 
-def table_gen(dataTCS):
+def table_gen( country="United States", level="state", numRows=12):
     import seaborn as sns
     # gradient across two colols, second is one color
     cm = sns.diverging_palette(150,10, n=12,l=55,center='light',as_cmap=True)
     cm = sns.light_palette('red',as_cmap=True)
 
 
-    dt = datetime.datetime.today().date()-datetime.timedelta(days=1)
+   
+    dt1 = datetime.datetime.today().date()-datetime.timedelta(days=1)
     dt2 = datetime.datetime.today().date()-datetime.timedelta(days=2)
 
-    # dataTCS = dataTCS.astype({"value":"int32"})
-    # display(dataTCS.loc[idx,"value"][dataTCS.loc[idx,"date"]==dt].to_frame().style
-    #     .background_gradient(cmap=cm,subset=['value']))
-
-    df = pd.DataFrame()
-    idx = pd.IndexSlice["-1","-1",:,"USA",["cases"]]
-    df["cases"] = dataTCS.loc[idx,"value"][dataTCS.loc[idx,"date"]==dt].copy()
-    idx = pd.IndexSlice["-1","-1",:,"USA",:]
-    #df["deaths"]= dataTCS.loc[idx,"value"][dataTCS.loc[idx,"date"]==dt].values
-    #df = df.reset_index().drop(["city","county","country","type"],axis=1)#
-    #df = df[ df["state"] != "-1"]
-
-    df = dataTCS.reset_index().copy()
-    g1 = df[(df["type"]=="cases")  & (df["country"]=="USA") & (df["date"]==dt) &  (df["county"]=="-1") & (df["city"]=="-1") & (df["state"]!="-1")].set_index(["state"])["value"].to_frame().rename(columns={"value":'cases1'})
-    g2 = df[(df["type"]=="deaths") & (df["country"]=="USA") & (df["date"]==dt) &  (df["county"]=="-1") & (df["city"]=="-1") & (df["state"]!="-1")].set_index(["state"])["value"].to_frame().rename(columns={"value":'deaths1'})
-    g3 = df[(df["type"]=="cases")  & (df["country"]=="USA") & (df["date"]==dt2) & (df["county"]=="-1") & (df["city"]=="-1") & (df["state"]!="-1")].set_index(["state"])["value"].to_frame().rename(columns={"value":'cases2'})
-    g4 = df[(df["type"]=="deaths") & (df["country"]=="USA") & (df["date"]==dt2) & (df["county"]=="-1") & (df["city"]=="-1") & (df["state"]!="-1")].set_index(["state"])["value"].to_frame().rename(columns={"value":'deaths2'})
-
     midx = pd.MultiIndex.from_tuples([
-        (dt,"cases"),(dt,"deaths"),(dt2,"cases"),(dt2,"deaths"),("delta","cases"),("delta","death"),("rate","cases"),("rate","death")
+        (dt1,"cases"),(dt1,"deaths"),(dt2,"cases"),(dt2,"deaths"),("delta","cases"),("delta","death"),("rate","cases"),("rate","death")
         ])
 
+    data=list()
+    ii=0
+    for dt in [dt1, dt2]:    
+        for dtype in  ["cases","deaths"]:        
+            if(level=="country"):
+                idx = pd.IndexSlice[:,:,:,:,      [dtype],level]
+            elif(level=="state"):
+                if(country=='.'):
+                    idx = pd.IndexSlice[:,:,:,:,[dtype],level]
+                else:
+                    idx = pd.IndexSlice[:,:,:,country,[dtype],level]
+            elif(level=="county"):
+                #does not work!
+                if(country=='.'):
+                    idx = pd.IndexSlice[:,:,:,:,[dtype],level]
+                else:
+                    idx = pd.IndexSlice[:,:,:,country,[dtype],level]   
+                    
+            gg = dataTCS.loc[idx,:][dataTCS.loc[idx,"date"]==dt]["value"].to_frame().reset_index().set_index([level]).rename(
+                columns={"value":'%d'%ii})
+            data.append(gg)
+            ii +=1
 
-
-    midx
-    idx = pd.IndexSlice["-1","-1",:,"USA",["cases"]]
-    dfFinal = pd.concat([g1,g2,g3,g4], axis=1,sort=False)
-
-
-    dfFinal["casesD"] = dfFinal["cases1"]-dfFinal["cases2"]
-    dfFinal["deathD"] = dfFinal["deaths1"]-dfFinal["deaths2"] 
+    dfFinal = pd.concat([data[0]['0'],data[1]['1'],
+                         data[2]['2'],data[3]['3']], axis=1,sort=False)    
+    dfFinal["casesD"] = dfFinal['0'] - dfFinal['2']
+    dfFinal["deathD"] = dfFinal['1'] - dfFinal['3']
     dfFinal = dfFinal.replace(0,1e-4)
-    dfFinal["rateC"]  = (dfFinal["cases1"]-dfFinal["cases2"])  /dfFinal["cases2"] 
-    dfFinal["rateD"]  = (dfFinal["deaths1"]-dfFinal["deaths2"])/dfFinal["deaths2"] 
+    dfFinal["rateC"]  = (dfFinal['0'] -dfFinal['2'] ) / dfFinal['2'] 
+    dfFinal["rateD"]  = (dfFinal['1'] -dfFinal['3'] ) / dfFinal['3']
     dfFinal.columns=midx
-    display(dfFinal.sort_values(by=("delta","cases"),ascending=False).head(12)
+    dfFinal
+    display(dfFinal.sort_values(by=("delta","cases"),ascending=False).head(numRows)
         .style
         .background_gradient(cmap=cm, subset=['delta',"rate"])
         .format({('rate',"cases"): "{:.1%}",('rate',"death"): "{:.1%}"})
@@ -210,7 +236,6 @@ def logisModel(t,K,Q,B,v,M):
     return K / ( (1+Q * np.exp(-B * (t-M)))**(1./v) )
 
 def plotty(ax1, ax2, y,v,yh, vh, C,minCount,label, label2=''):
-    minCount = 150
     M = np.argwhere(y>minCount)[0][0]
     ax1.semilogy(yh)
     ax1.semilogy(y)
@@ -230,15 +255,24 @@ def plotty(ax1, ax2, y,v,yh, vh, C,minCount,label, label2=''):
 
 
 def projector(
-    stype='cases',
-    city   ='-1',
-    county ='-1',
-    state ="CA",
-    country="USA",
+    stype = 'cases',
+    level = "state",
+    target= "California",
     minCount = 0
 ):
-    idx = pd.IndexSlice[city, county, state, country, stype]
+    """
+    Project future growth
+    type    - cases, deaths
+    states  -
+    """
+    if(  level == "county"):  idx = pd.IndexSlice[:,    target,:,:, stype,level]
+    elif(level == "state"):   idx = pd.IndexSlice[:,:,  target,:,   stype,level]
+    elif(level == "country"): idx = pd.IndexSlice[:,:,:,target,     stype,level]
+    
     y = dataTCS.loc[idx,"value"]
+    if(sp.size(y)<5):
+        print("not enough data")
+        return
     y=y.astype("int32")
     ys  = sp.signal.savgol_filter(y, 5, 2, mode='nearest')
     v=y.diff().values[1:]
@@ -304,7 +338,7 @@ def projector(
     ax11.text(sp.size(vs), int(vs[-1]*.6),"%d"%(NtoP),  {'color': 'red', 'fontsize': 10})
 
 
-    ss = [i  for i in idx if i != '-1']
+    ss = dataTCS.loc[idx,"name"][0]#[i  for i in idx if i != '-1']
     print("{desc}: K={K:,} B={B:.2f} Q={Q:.2f} v={v:.2f} Ndays to peak=({N})".format(
         desc=' '.join(ss),
         K=int(params[0]),B=params[1],Q=params[2],v=params[3],N=NtoP
