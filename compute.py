@@ -51,27 +51,29 @@ plt.rc('axes', prop_cycle=default_cycler)
 def getList(level,parent=""):
     if(level=="country"):
         idx    = pd.IndexSlice[:,:,:,:,"cases",level]
-        selIdx= 3;
-        f=lambda i: pd.IndexSlice[:,:,:,i,     "cases",level]
+        selIdx= "country";
+        #f=lambda i: pd.IndexSlice[:,:,:,i,     "cases",level]
     elif(level=="state"):
         #must have country with state
         if(parent!=""):
             idx    = pd.IndexSlice[:,:,:,parent,"cases",level]
         else:
             idx    = pd.IndexSlice[:,:,:,:,     "cases",level]
-        selIdx= 2;
-        f=lambda i: pd.IndexSlice[:,:,i,:,     "cases",level]
+        selIdx= "state";
+        #f=lambda i: pd.IndexSlice[:,:,i,:,     "cases",level]
     elif(level=="county"):
         #must have country with state
         if(parent!=""):
             idx    = pd.IndexSlice[:,:,parent,:,"cases",level]
         else:
             idx    = pd.IndexSlice[:,:,:,:,     "cases",level]            
-        selIdx= 1;
-        f=lambda i: pd.IndexSlice[:,i,:,:,     "cases",level]
+        selIdx= "county";
+        #f=lambda i: pd.IndexSlice[:,i,:,:,     "cases",level]
     g = dataTCS.loc[idx,:][dataTCS.loc[idx,"date"] == (datetime.date.today()-datetime.timedelta(days=2)) ]
     g.sort_values(by="value",inplace=True,ascending=False);      
-    return dict([ ["%s: %d"%(c[selIdx],dataTCS.loc[f(c[selIdx]),"value"].values[-1]),c[selIdx]] for c  in g.index.values])
+    g.reset_index(inplace=True)
+    return dict([ ["%s: %d"%(row[selIdx],row["value"]) , row[selIdx]] for idx, row in g.iterrows()])
+    #return dict([ ["%s: %d"%(c[selIdx],dataTCS.loc[f(c[selIdx]),"value"].values[-1]),c[selIdx]] for c  in g.index.values])
 
 #** panda data frame styles
 from IPython.display import display_html
@@ -85,16 +87,18 @@ def display_side_by_side(*args):
     
 def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",equalizeCount=100, 
             plotKpi="deaths",logyPlot=True,
-            level="country", country="", reference=False, xlim=-1, ylim=-1, dteOffset=-2, maxEntries=12):
+            level="country", country="", reference=False, xlim=-1, ylim=-1, dteOffset=-1, maxEntries=12,
+           ):
+    output=[]
     idx = pd.IndexSlice
-        
-    fig,ax = plt.subplots(1,1)    
+    fig,ax = plt.subplots(1,1)
+    
     if(equalize):
         if(level=="country"):
             g = dataTCS.loc[idx[:,:,:,equalizeTrg,minCountKpi,level],:]
         else:
             g = dataTCS.loc[idx[:,:,equalizeTrg,:,minCountKpi,level],:]
-        if(max(g["value"]) < equalizeCount):
+        if(np.max(g["value"]) < equalizeCount):
             print("reduce equalize count")
             return
         gdts = g[g["value"]>equalizeCount]["date"].values[0]
@@ -105,11 +109,9 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
         ref =  [8., 13., 21., 34.]
         for rate in np.array(ref)/100.:            
             d = g[g["date"]>=gdts]["date"]
-            #y0= g[g["date"]>=gdts]["value"].values[0]
             y0=equalizeCount
             M= sp.size(d.values)
-            ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--')#,label="ref%.1f"%(rate*100))
-        #print(ref)
+            ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--')
     if(level=="country"):
         idxScreen = lambda ctr :idx[:,:,:,ctr,minCountKpi,level];
         idxPlot   = lambda ctr :idx[:,:,:,ctr,plotKpi    ,level];
@@ -119,8 +121,8 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
         idxScreen = lambda ctr :idx[:,:,ctr,:,minCountKpi,level];
         idxPlot   = lambda ctr :idx[:,:,ctr,:,plotKpi    ,level];
         # using states here
-        countries = np.sort(np.unique(dataTCS.loc[idx[:,:,:,country,"cases",level],:].index.values),ascending=False)
-    
+        countries = np.unique(dataTCS.loc[idx[:,:,:,country,"cases",level],:].sort_values(by="value",ascending=False).index.values)
+        
     # temp commented out    
     entries=0
     for ctr in countries:  
@@ -149,8 +151,8 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
             print(M)
         if(entries>=maxEntries): continue
         entries +=1
-        ax.plot(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])    
-    
+        ax.plot(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])
+        output.append(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])    
     ax.xaxis.set_major_locator(myLocator)
     ax.xaxis.set_major_formatter(myFmt)
     ax.grid()
@@ -168,21 +170,6 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
     plt.title("%s vs time"%plotKpi);
 
     if(logyPlot) : plt.yscale('log')
-        
-# country screen
-minCount     = 10000
-minCountKpi  = "cases" # 'active', 'cases', 'deaths', 'growthFactor', 'recovered', 'tested'
-# Equalize (kpi same as plot)
-equalize     = True
-equalizeTrg  = "ITA"
-equalizeCount= 500
-
-# plot 
-plotKpi      = "cases"
-logyPlot     = True
-#plotter(minCount,minCountKpi,equalize,equalizeTrg,equalizeCount, plotKpi,logyPlot)         
-
-
 
 def table_gen( country="United States", level="state", numRows=12):
     import seaborn as sns
@@ -277,7 +264,7 @@ def projector(
     level = "state",
     target= "California",
     minCount = 100,
-    dteOffset=-2,
+    dteOffset=0,
     smoothLength=5,
     smoothOrder =2,
     logyPlot    =True
@@ -379,13 +366,18 @@ def projector(
     ax12.text(sp.size(vs), int(vs[-1]*.6),"%d"%(NtoP),  {'color': 'red', 'fontsize': 10})
     
     C=max(C, np.argmax(vh))
-    M = C-min(np.argwhere(yh1>minCount)[0][0],np.argwhere(yh2>minCount)[0][0])
+    try:
+        M = C-min(np.argwhere(yh1>minCount)[0][0],np.argwhere(yh2>minCount)[0][0])
+    except:
+        print(np.argwhere(yh1>minCount))
+        print(np.argwhere(yh2>minCount))
+        return
     
     if(M <=1):
         print("min count to close to peak")
         return    
     ax00.set_ylim([1+minCount * .5,int(max(np.max(yh1),np.max(yh2))* 1.5)])        
-    ax10.set_ylim([1,int(max(np.max(vh1),np.max(vh2))* 1.5)])   
+    ax10.set_ylim([1,np.max([np.max(vh1),np.max(vh2), np.max(v)])* 1.5])   
     
     ax10.set_xlim([C-M,C+M])
     ax11.set_xlim([C-M,C+M])
