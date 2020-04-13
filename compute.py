@@ -47,6 +47,37 @@ default_cycler = (cycler(marker=['.','*','+','x','s']) *
                   cycler(lw=[1]))
 
 plt.rc('axes', prop_cycle=default_cycler)
+import asyncio
+
+class Timer:
+    def __init__(self, timeout, callback):
+        self._timeout = timeout
+        self._callback = callback
+        self._task = asyncio.ensure_future(self._job())
+
+    async def _job(self):
+        await asyncio.sleep(self._timeout)
+        self._callback()
+
+    def cancel(self):
+        self._task.cancel()
+
+def debounce(wait):
+    """ Decorator that will postpone a function's
+        execution until after `wait` seconds
+        have elapsed since the last time it was invoked. """
+    def decorator(fn):
+        timer = None
+        def debounced(*args, **kwargs):
+            nonlocal timer
+            def call_it():
+                fn(*args, **kwargs)
+            if timer is not None:
+                timer.cancel()
+            timer = Timer(wait, call_it)
+        return debounced
+    return decorator
+
 
 def getList(level,parent=""):
     if(level=="country"):
@@ -85,33 +116,35 @@ def display_side_by_side(*args):
     
     
     
-def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",equalizeCount=100, 
-            plotKpi="deaths",logyPlot=True,
-            level="country", country="", reference=False, xlim=-1, ylim=-1, dteOffset=-1, maxEntries=12,
+def plotter(minCount=5000,
+            minCountKpi="cases",
+            equalize=True,
+            equalizeTrg="ITA",
+            equalizeCount=100, 
+            plotKpi="deaths",
+            level="country", 
+            country="" ,
+            dteOffset=-1
            ):
     output=[]
     idx = pd.IndexSlice
-    fig,ax = plt.subplots(1,1)
     
-    if(equalize):
-        if(level=="country"):
-            g = dataTCS.loc[idx[:,:,:,equalizeTrg,minCountKpi,level],:]
-        else:
-            g = dataTCS.loc[idx[:,:,equalizeTrg,:,minCountKpi,level],:]
+    if(level=="country"):
+        g = dataTCS.loc[idx[:,:,:,equalizeTrg,minCountKpi,level],:]
+    else:
+        g = dataTCS.loc[idx[:,:,equalizeTrg,:,minCountKpi,level],:]    
+    if(equalize):        
         if(np.max(g["value"]) < equalizeCount):
             print("reduce equalize count")
             return
         gdts = g[g["value"]>equalizeCount]["date"].values[0]
         gdte = g["date"].values[dteOffset]
-        N = (gdte-gdts).days#sp.size(g[g["value"]>equalizeCount]["date"].values)
-        #print("Equalize to %s : date:%s to %s" % (equalizeTrg,gdts,gdte))
-    if(reference):
-        ref =  [8., 13., 21., 34.]
-        for rate in np.array(ref)/100.:            
-            d = g[g["date"]>=gdts]["date"]
-            y0=equalizeCount
-            M= sp.size(d.values)
-            ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--')
+    else:
+        gdts = g["date"].values[0]
+        gdte = g["date"].values[-1]
+    N = (gdte-gdts).days
+    
+            #ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--')
     if(level=="country"):
         idxScreen = lambda ctr :idx[:,:,:,ctr,minCountKpi,level];
         idxPlot   = lambda ctr :idx[:,:,:,ctr,plotKpi    ,level];
@@ -121,17 +154,11 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
         idxScreen = lambda ctr :idx[:,:,ctr,:,minCountKpi,level];
         idxPlot   = lambda ctr :idx[:,:,ctr,:,plotKpi    ,level];
         # using states here
-        countries = np.unique(dataTCS.loc[idx[:,:,:,country,"cases",level],:].sort_values(by="value",ascending=False).index.values)
-        
-    # temp commented out    
-    entries=0
+        countries = np.unique(dataTCS.loc[idx[:,:,:,country,"cases",level],:].sort_values(by="value",ascending=False).index.values)       
+    
     for ctr in countries:  
         try:
-            if dataTCS.loc[idxScreen(ctr),"value"].values[dteOffset]< minCount: 
-                continue     
-        except:
-            continue
-        try:
+            if dataTCS.loc[idxScreen(ctr),"value"].values[dteOffset]< minCount: continue             
             g = dataTCS.loc[idxPlot(ctr),["date","value"]]        
         except:
             continue        
@@ -140,36 +167,20 @@ def plotter(minCount=5000,minCountKpi="cases",equalize=True,equalizeTrg="ITA",eq
             if False == (g["value"][dteOffset]>equalizeCount).any():continue
                 
             dts = g[g["value"]>equalizeCount]["date"].values[0]
-            #print("%s --> %d" %(ctr,(dts-gdts).days))
             data= g[g["date"]>=dts]
-            M = min(N,sp.size(data["value"]))
-            ts = [(gdts + datetime.timedelta(i)) for i in range(0,sp.size(data["value"]))] 
+            M   = min(N,sp.size(data["value"]))
+            ts  = [(gdts + datetime.timedelta(i)) for i in range(0,sp.size(data["value"]))] 
         else:
-            ts=g.index
-            data=g
-            M=sp.size(g["value"])
-            print(M)
-        if(entries>=maxEntries): continue
-        entries +=1
-        ax.plot(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])
-        output.append(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])    
-    ax.xaxis.set_major_locator(myLocator)
-    ax.xaxis.set_major_formatter(myFmt)
-    ax.grid()
-    mm = max(dataTCS.loc[idx[:,:,:,:,plotKpi],"value"])
-    if(ylim==-1):
-        ax.set_ylim(equalizeCount * .5, mm * 1.5)
-    else:
-        ax.set_ylim(equalizeCount * .5, ylim)
-    if(xlim==-1):
-        ax.set_xlim(gdts,gdte)
-    else:
-        ax.set_xlim(gdts,gdts+datetime.timedelta(xlim))
-    ax.legend(prop={'size': 6}, ncol=int(entries/2.))
-    fig.autofmt_xdate()    
-    plt.title("%s vs time"%plotKpi);
+            ts  = g["date"]
+            data= g
+            M   = sp.size(g["value"])
+        
+        #ax.plot(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])
+        output.append([ts[0:M],data["value"][0:M].values,dataTCS.loc[idxPlot(ctr),:].name.values[0]])    
 
-    if(logyPlot) : plt.yscale('log')
+    mm = max(dataTCS.loc[idx[:,:,:,:,plotKpi],"value"])        
+    
+    return [output,gdts,gdte]
 
 def table_gen( country="United States", level="state", numRows=12):
     import seaborn as sns
