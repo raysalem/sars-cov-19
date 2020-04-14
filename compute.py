@@ -11,7 +11,8 @@ import scipy.signal
 from sklearn.linear_model import LinearRegression
 from IPython.display import display, HTML
 from ipywidgets import *
-
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # try:
 from packaging import version
@@ -118,8 +119,8 @@ def display_side_by_side(*args):
     
 def plotter(minCount=5000,
             minCountKpi="cases",
-            equalize=True,
-            equalizeTrg="ITA",
+            equalize=False,
+            equalizeTrg="Italy",
             equalizeCount=100, 
             plotKpi="deaths",
             level="country", 
@@ -133,6 +134,7 @@ def plotter(minCount=5000,
         g = dataTCS.loc[idx[:,:,:,equalizeTrg,minCountKpi,level],:]
     else:
         g = dataTCS.loc[idx[:,:,equalizeTrg,:,minCountKpi,level],:]    
+    
     if(equalize):        
         if(np.max(g["value"]) < equalizeCount):
             print("reduce equalize count")
@@ -142,43 +144,39 @@ def plotter(minCount=5000,
     else:
         gdts = g["date"].values[0]
         gdte = g["date"].values[-1]
-    N = (gdte-gdts).days
+    N=(gdte-gdts).days
     
-            #ax.plot(d,y0*np.exp(rate * np.arange(0,M)),'k--')
     if(level=="country"):
-        idxScreen = lambda ctr :idx[:,:,:,ctr,minCountKpi,level];
-        idxPlot   = lambda ctr :idx[:,:,:,ctr,plotKpi    ,level];
-        countries = dataTCS.index.levels[3]
+        idxScreen = lambda ctr :pd.IndexSlice[:,:,:,ctr,minCountKpi,level];
+        idxPlot   = lambda ctr :pd.IndexSlice[:,:,:,ctr,plotKpi    ,level];
+        idxer     = pd.IndexSlice            [:,:,:,:,  minCountKpi,level]
     else:
         #ctr becomes a loop variable for state
-        idxScreen = lambda ctr :idx[:,:,ctr,:,minCountKpi,level];
-        idxPlot   = lambda ctr :idx[:,:,ctr,:,plotKpi    ,level];
-        # using states here
-        countries = np.unique(dataTCS.loc[idx[:,:,:,country,"cases",level],:].sort_values(by="value",ascending=False).index.values)       
+        idxScreen = lambda ctr :pd.IndexSlice[:,:,ctr,:,minCountKpi,level];
+        idxPlot   = lambda ctr :pd.IndexSlice[:,:,ctr,:,plotKpi    ,level];
+        idxer     = pd.IndexSlice            [:,:,:,:,  minCountKpi,level]
     
-    for ctr in countries:  
-        try:
-            if dataTCS.loc[idxScreen(ctr),"value"].values[dteOffset]< minCount: continue             
-            g = dataTCS.loc[idxPlot(ctr),["date","value"]]        
-        except:
-            continue        
+    for iii, row in dataTCS.loc[idxer,:][
+        (dataTCS.loc[idxer,:]["date"]  == gdte     ) &
+        (dataTCS.loc[idxer,:]["value"] >  minCount ) 
+        #& (dataTCS.loc[idxer2,:]["value"] >5000 ) 
+        ].iterrows():
+        ctr = iii[3] if level=="country" else iii[2]
+        g = dataTCS.loc[idxScreen(ctr),:]
         if(equalize):
             #check if sufficent samples exist to equlize
             if False == (g["value"][dteOffset]>equalizeCount).any():continue
                 
             dts = g[g["value"]>equalizeCount]["date"].values[0]
-            data= g[g["date"]>=dts]
-            M   = min(N,sp.size(data["value"]))
-            ts  = [(gdts + datetime.timedelta(i)) for i in range(0,sp.size(data["value"]))] 
+            data= g[g["date"]>=dts]["value"]
+            M   = min(N,sp.size(data))
+            ts  = [(gdts + datetime.timedelta(i)) for i in range(0,sp.size(data))] 
         else:
             ts  = g["date"]
-            data= g
-            M   = sp.size(g["value"])
-        
-        #ax.plot(ts[0:M],data["value"][0:M].values,label=dataTCS.loc[idxPlot(ctr),:].name.values[0][0:5])
-        output.append([ts[0:M],data["value"][0:M].values,dataTCS.loc[idxPlot(ctr),:].name.values[0]])    
-
-    mm = max(dataTCS.loc[idx[:,:,:,:,plotKpi],"value"])        
+            data= g["value"]
+            M   = sp.size(g)
+               
+        output.append([ts[0:M],data[0:M].values,ctr])    
     
     return [output,gdts,gdte]
 
@@ -249,23 +247,7 @@ def logisModel(t,K,Q,B,v,M):
     #return A + (K-A) / ( (C + Q * np.exp(-B * (t-M)))**(1./v) )
     return K / ( (1+Q * np.exp(-B * (t-M)))**(1./v) )
 
-def plotty(ax1, ax2, y,v,yh, vh,logyPlot, label, label2='',):    
-    
-    
-    if(logyPlot) :
-        ax1.semilogy(yh)
-        ax1.semilogy(y)
-    else:
-        ax1.plot(yh)
-        ax1.plot(y)
-    ax1.grid();
 
-    ax1.set_title(label)
-    
-    ax2.plot(vh)    
-    ax2.plot(v)    
-    ax2.grid()        
-    ax2.set_title(label2)
     
 
 
@@ -326,55 +308,58 @@ def projector(
     params2, params_covariance2 = optimize.curve_fit(fLogistic,t,ys,  maxfev  = int(1e4))
     print(params)
 
-    fig  = plt.figure()#constrained_layout=True)
-    spec = fig.add_gridspec(3, 3)
-    spec.update(wspace=0.0, hspace=0.0)
-    ax10 = fig.add_subplot(spec[1, 0])
-    ax00 = fig.add_subplot(spec[0, 0],sharex=ax10)    
-    ax11 = fig.add_subplot(spec[1, 1],sharey=ax10            );plt.setp(ax11.get_yticklabels(), visible=False)    
-    ax01 = fig.add_subplot(spec[0, 1],sharex=ax11,sharey=ax00);plt.setp(ax01.get_yticklabels(), visible=False)
-    ax12 = fig.add_subplot(spec[1, 2],            sharey=ax10);plt.setp(ax12.get_yticklabels(), visible=False)
-    ax02 = fig.add_subplot(spec[0, 2],sharex=ax12,sharey=ax00);plt.setp(ax02.get_yticklabels(), visible=False)
+    fig = make_subplots(rows=2, cols=3, 
+                    shared_xaxes=True, 
+                    shared_yaxes=True, 
+                    vertical_spacing=0.00,
+                    horizontal_spacing = 0.0)
     
-
     
-    plt.setp(ax00.get_xticklabels(), visible=False)
-    plt.setp(ax01.get_xticklabels(), visible=False)
-    plt.setp(ax02.get_xticklabels(), visible=False)
-
     t = np.arange(0,sp.size(y)+300)
 
     yh =newcModel(t,A,B,C)
     vh = cumModel(t,A,B,C)
-    plotty(ax00, ax10, y.values,v, yh,vh, label="tanh B=%.2f"%B,logyPlot=logyPlot)
+    #plotty(ax00, ax10, y.values,v, yh,vh, label="tanh B=%.2f"%B,logyPlot=logyPlot)
+    fig.add_trace(go.Scatter(y=yh,line = dict(color='green', width=1, dash='dash')), row=1, col=1,)
+    fig.add_trace(go.Scatter(y=y ,line = dict(color='blue',  width=1, dash='dot' )), row=1, col=1,)
+    fig.add_trace(go.Scatter(y=vh,line = dict(color='green', width=1, dash='dash')), row=2, col=1,)
+    fig.add_trace(go.Scatter(y=v ,line = dict(color='blue',  width=1, dash='dot' )), row=2, col=1,)
 
 
     yh = fLogistic(t,params[0],params[1],params[2],params[3],params[4])    
     yh1=yh
     vh = np.diff(yh)
     vh1=vh
-    plotty(ax01, ax11, y.values,v, yh,vh, label="logistic",logyPlot=logyPlot)
+    fig.add_trace(go.Scatter(y=yh1,line = dict(color='green', width=1, dash='dash')), row=1, col=2)
+    fig.add_trace(go.Scatter(y=ys ,line = dict(color='blue',  width=1, dash='dot' )), row=1, col=2)
+    fig.add_trace(go.Scatter(y=vh1,line = dict(color='green', width=1, dash='dash')), row=2, col=2)
+    fig.add_trace(go.Scatter(y=v  ,line = dict(color='blue',  width=1, dash='dot' )), row=2, col=2)
 
     Np = vh.argmax()    
     NtoP=Np-sp.size(v);
 
-    ax11.annotate("", xy=(sp.size(v), vh[-1]), xytext=(Np, vh[-1]),
-                 arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-    ax11.text(sp.size(vs), int(vs[-1]*.6),"%d"%(NtoP),  {'color': 'red', 'fontsize': 10})
+    #ax11.annotate("", xy=(sp.size(v), vh[-1]), xytext=(Np, vh[-1]),
+    #             arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
+    #ax11.text(sp.size(vs), int(vs[-1]*.6),"%d"%(NtoP),  {'color': 'red', 'fontsize': 10})
     
     
     yh = fLogistic(t,params2[0],params2[1],params2[2],params2[3],params2[4])    
     yh2=yh
     vh = np.diff(yh)      
     vh2=vh
-    plotty(ax02, ax12, ys,vs,yh,vh,label="logistic In:Smooth",logyPlot=logyPlot)
+    
+    fig.add_trace(go.Scatter(y=yh2,line = dict(color='green', width=1, dash='dash')), row=1, col=3,)
+    fig.add_trace(go.Scatter(y=ys ,line = dict(color='blue',  width=1, dash='dot' )), row=1, col=3,)
+    fig.add_trace(go.Scatter(y=vh2,line = dict(color='green', width=1, dash='dash')), row=2, col=3,)
+    fig.add_trace(go.Scatter(y=vs ,line = dict(color='blue',  width=1, dash='dot' )), row=2, col=3,)
+    
     
     Np = vh.argmax()    
     NtoP=Np-sp.size(vs);
 
-    ax12.annotate("", xy=(sp.size(vs), vh[-1]), xytext=(Np, vh[-1]),
-                 arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-    ax12.text(sp.size(vs), int(vs[-1]*.6),"%d"%(NtoP),  {'color': 'red', 'fontsize': 10})
+    #ax12.annotate("", xy=(sp.size(vs), vh[-1]), xytext=(Np, vh[-1]),
+    #             arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
+    #ax12.text(sp.size(vs), int(vs[-1]*.6),"%d"%(NtoP),  {'color': 'red', 'fontsize': 10})
     
     C=max(C, np.argmax(vh))
     try:
@@ -387,19 +372,29 @@ def projector(
     if(M <=1):
         print("min count to close to peak")
         return    
-    ax00.set_ylim([1+minCount * .5,int(max(np.max(yh1),np.max(yh2))* 1.5)])        
-    ax10.set_ylim([1,np.max([np.max(vh1),np.max(vh2), np.max(v)])* 1.5])   
     
-    ax10.set_xlim([C-M,C+M])
-    ax11.set_xlim([C-M,C+M])
-    ax12.set_xlim([C-M,C+M])
+    if(logyPlot) :
+        fig.update_layout( yaxis_type="log")
+        fax_y = lambda x:np.log10(x)
+    else:
+        fig.update_layout( yaxis_type="linear") 
+        fax_y = lambda x:x
+    
+    #ax00.set_ylim([1+minCount * .5,int(max(np.max(yh1),np.max(yh2))* 1.5)])        
+    #ax10.set_ylim([1,np.max([np.max(vh1),np.max(vh2), np.max(v)])* 1.5])   
+    
+
+    fig.update_xaxes(range=[C-M,C+M],row=2,col=1)
+    fig.update_xaxes(range=[C-M,C+M],row=2,col=2)
+    fig.update_xaxes(range=[C-M,C+M],row=2,col=3)
+
 
     ss = dataTCS.loc[idx,"name"][0]#[i  for i in idx if i != '-1']
     print("{desc}: K={K:,} B={B:.2f} Q={Q:.2f} v={v:.2f} Ndays to peak=({N})".format(
         desc=' '.join(ss),
         K=int(params[0]),B=params[1],Q=params[2],v=params[3],N=NtoP
         ))       
-
+    fig.show()
  
 
 
